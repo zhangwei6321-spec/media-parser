@@ -441,8 +441,13 @@ class APIHandler(BaseHTTPRequestHandler):
             if v:
                 self.send_header(h, v)
         if download:
-            self.send_header('Content-Disposition',
-                             'attachment; filename="%s"' % urllib.parse.quote(filename))
+            # RFC 5987：中文文件名用 filename*，filename 给 ASCII 兜底
+            quoted = urllib.parse.quote(filename)
+            ascii_fallback = re.sub(r'[^\x20-\x7e]', '_', filename).strip('_') or 'media'
+            ascii_fallback = ascii_fallback.replace('"', '')
+            self.send_header(
+                'Content-Disposition',
+                "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (ascii_fallback, quoted))
         self.end_headers()
         try:
             while True:
