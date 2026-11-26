@@ -78,8 +78,11 @@ var Downloader = (function () {
    * Safari 对 iframe 下载不友好，退回新标签。
    */
   function triggerDirectDownload(url, filename) {
-    var isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
-    if (isSafari) {
+    var ua = navigator.userAgent;
+    // iOS 全系、微信内置浏览器对 iframe 下载不友好，直接新标签（attachment 会自动落盘）
+    var needWindow = /iP(hone|ad|od)/i.test(ua) || /MicroMessenger/i.test(ua)
+      || /^((?!chrome|android|crios|fxios).)*safari/i.test(ua);
+    if (needWindow) {
       window.open(url, '_blank', 'noopener');
       return;
     }
