@@ -1,8 +1,6 @@
 # 媒体解析器 — 解析后端
 
-抖音 / 快手 解析后端（Python 标准库，无第三方依赖），为
-[book-reader/media-parser](https://zhangwei6321-spec.github.io/book-reader/media-parser/)
-提供 `/api/parse`、`/api/preview/video`、`/api/preview/image`、`/api/download`。
+抖音 / 快手 解析后端（Python 标准库，无第三方依赖），为 GitHub Pages 上的前端 `book-reader/media-parser` 提供 `/api/parse`、`/api/preview/video`、`/api/preview/image`、`/api/download`。
 
 Render 服务：https://media-parser-bfmx.onrender.com
 
