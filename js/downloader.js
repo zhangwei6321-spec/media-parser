@@ -72,15 +72,22 @@ var Downloader = (function () {
     setTimeout(function () { URL.revokeObjectURL(blobUrl); }, 5000);
   }
 
+  /**
+   * 走隐藏 iframe 触发下载：后端返回 Content-Disposition: attachment，
+   * 浏览器直接落盘，页面不会被导航走（a[download] 在跨域时会被忽略）。
+   * Safari 对 iframe 下载不友好，退回新标签。
+   */
   function triggerDirectDownload(url, filename) {
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.target = '_blank';
-    a.rel = 'noopener noreferrer';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    var isSafari = /^((?!chrome|android|crios|fxios).)*safari/i.test(navigator.userAgent);
+    if (isSafari) {
+      window.open(url, '_blank', 'noopener');
+      return;
+    }
+    var frame = document.createElement('iframe');
+    frame.style.cssText = 'display:none;width:0;height:0;border:0';
+    frame.src = url;
+    document.body.appendChild(frame);
+    setTimeout(function () { frame.remove(); }, 120000);
   }
 
   function generateFilename(result) {

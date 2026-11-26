@@ -63,7 +63,8 @@ var Parser = (function () {
   /** 带超时的 fetch */
   function fetchWithTimeout(url, options, timeoutMs) {
     var controller = new AbortController();
-    var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 30000);
+    // 免费实例冷启动常 30~50s，30s 会把「正在启动」误判成失败
+    var timer = setTimeout(function () { controller.abort(); }, timeoutMs || 95000);
     var opts = Object.assign({}, options || {}, { signal: controller.signal });
     return fetch(url, opts).then(function (resp) {
       clearTimeout(timer);
@@ -105,7 +106,7 @@ var Parser = (function () {
     }
 
     if (platform === 'douyin' || platform === 'kuaishou') {
-      if (onStatus) onStatus(isLocal ? '连接本地后端...' : '连接云端后端...');
+      if (onStatus) onStatus(isLocal ? '连接本地后端...' : '正在请求解析服务（首次可能冷启动 30~60 秒）...');
       return parseViaBackend(trimmed, platform, onStatus);
     }
 
@@ -140,14 +141,25 @@ var Parser = (function () {
       if (!mediaUrl) throw new Error('未获取到媒体地址，请稍后重试');
 
       var images = (d.images || []).filter(Boolean);
+
+      // 下载文件名交给后端 Content-Disposition 决定（跨域时 a[download] 会被浏览器忽略）
+      var saveName = (d.filename || '').trim();
+      if (!saveName) {
+        var rawTitle = (d.title || d.desc || (d.author && d.author.nickname) || '') + '';
+        rawTitle = rawTitle.replace(/[#@][^\s#@]{1,40}/g, ' ')
+          .replace(/\s+/g, ' ').replace(/[<>:"\/\\|?*#]/g, '_').trim().substring(0, 60);
+        saveName = (rawTitle || (info.name + '媒体')) + (type === 'image' ? '.jpg' : '.mp4');
+      }
+
       return {
         originalUrl: url, platform: platform,
         platformName: info.name, platformIcon: info.icon,
         mediaUrl: mediaUrl,
         previewUrl: proxiedMediaUrl(mediaUrl, type),
-        downloadUrl: BACKEND_BASE + '/api/download?url=' + encodeURIComponent(mediaUrl),
+        downloadUrl: BACKEND_BASE + '/api/download?url=' + encodeURIComponent(mediaUrl)
+                     + '&filename=' + encodeURIComponent(saveName),
         coverUrl: d.coverUrl || d.cover_url || null,
-        title: (d.desc || d.title || '').trim()
+        title: (d.title || d.desc || '').trim()
                || ((d.author && d.author.nickname) ? d.author.nickname + ' 的作品' : info.name + '视频'),
         author: (d.author && (d.author.nickname || d.author.uniqueId)) || d.nickname || '',
         music: (d.music && d.music.title) || '',
@@ -159,7 +171,7 @@ var Parser = (function () {
       };
     }).catch(function (e) {
       if (e.message === 'timeout') {
-        throw new Error('后端响应超时（免费实例冷启动约需 30 秒），请稍后重试');
+        throw new Error('解析服务冷启动超时（免费实例约 30~60 秒），请再点一次「解析」');
       }
       if (e instanceof TypeError && String(e.message).indexOf('fetch') >= 0) {
         throw new Error('无法连接解析后端，请检查网络');

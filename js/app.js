@@ -94,7 +94,7 @@
       var host = window.location.hostname;
       var isLocal = host === 'localhost' || host === '127.0.0.1' || host === '';
       if (!isLocal) {
-        hint.innerHTML = '🌐 在线版 — 抖音/快手需<a href="https://github.com/zhangwei6321-spec/media-parser" target="_blank">本地部署</a>后端 | 视频/图片直链正常';
+        hint.innerHTML = '🌐 在线版 — 抖音/快手解析走云端后端（首次点击可能冷启动 30~60 秒）| 视频/图片直链即点即解析';
       }
     } catch (_e) {}
   }

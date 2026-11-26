@@ -160,10 +160,41 @@ FILTER_HINTS = {
 }
 
 
+# 同一作品的解析结果缓存：重复解析/刷预览不再打抖音（免费实例 CPU 和 IP 都很宝贵）
+_item_cache = {}
+_item_lock = threading.Lock()
+ITEM_TTL = 30 * 60
+
+
+def clean_title(desc, author='', maxlen=60):
+    """把 desc 洗成能当文件名的单行标题：去话题、去 emoji、压空白、限长。"""
+    t = (desc or '').replace('\r', ' ').replace('\n', ' ')
+    t = re.sub(r'#[^#\s]{1,40}', ' ', t)                     # #话题 标签
+    t = re.sub(r'@[^\s@]{1,30}', ' ', t)                     # @某人
+    t = re.sub(r'[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u200D\u2B00-\u2BFF]', '', t)
+    t = re.sub(r'\s+', ' ', t)
+    t = re.sub(r'\s+([，。！？、；：,.!?;:])', r'\1', t)
+    t = t.strip(' -_·|.,、')
+    if not t:
+        t = (author.strip() + ' 的作品') if author and author.strip() else '抖音视频'
+    if len(t) > maxlen:
+        cut = t[:maxlen]
+        pos = max((cut.rfind(c) for c in '，。！？、；：,'), default=-1)
+        if pos >= maxlen * 0.5:      # 截断点离末尾太近就忍一下，别把标题砍成半句
+            cut = cut[:pos]
+        t = cut
+    return t.strip(' -_·|.,、') or '抖音视频'
+
+
 def fetch_share_item(aweme_id):
     """抓 iesdouyin 分享页 SSR，返回 item dict。失败抛 ValueError(可读原因)。"""
     if not aweme_id:
         raise ValueError('无法提取视频 ID，请确认链接有效')
+
+    with _item_lock:
+        hit = _item_cache.get(aweme_id)
+        if hit and time.time() - hit[1] < ITEM_TTL:
+            return hit[0]
 
     ttwid = get_ttwid()
     if not ttwid:
@@ -195,11 +226,19 @@ def fetch_share_item(aweme_id):
 
     items = info.get('item_list') or []
     if items:
+        picked = items[0]
         # 命中目标 ID 的优先
         for it in items:
             if str(it.get('aweme_id') or '') == str(aweme_id):
-                return it
-        return items[0]
+                picked = it
+                break
+        with _item_lock:
+            if len(_item_cache) > 200:
+                oldest = sorted(_item_cache.items(), key=lambda kv: kv[1][1])[:80]
+                for k, _ in oldest:
+                    _item_cache.pop(k, None)
+            _item_cache[aweme_id] = (picked, time.time())
+        return picked
 
     # 没有数据 —— 把 filter_list 的原因翻译成人话
     reasons = []
@@ -278,10 +317,17 @@ def parse_douyin(share_url):
     if not cover and images:
         cover = images[0]
 
+    title = clean_title(item.get('desc') or '', author.get('nickname') or '')
+    # 文件名比展示标题更短（移动端/浏览器对超长中文名的处理各不相同）
+    filename = clean_title(item.get('desc') or '', author.get('nickname') or '', 36) \
+               + ('.jpg' if media_type == 'image' else '.mp4')
+
     return {
         'platform': 'douyin',
         'videoId': str(item.get('aweme_id') or aweme_id),
         'desc': item.get('desc') or '',
+        'title': title,
+        'filename': filename,
         'videoUrl': play_url,
         'coverUrl': cover,
         'author': {
@@ -441,10 +487,14 @@ class APIHandler(BaseHTTPRequestHandler):
             if v:
                 self.send_header(h, v)
         if download:
-            # RFC 5987：中文文件名用 filename*，filename 给 ASCII 兜底
+            # RFC 5987：中文文件名用 filename*，filename 给 ASCII 兜底（纯中文名兜底别只剩 ".mp4"）
             quoted = urllib.parse.quote(filename)
-            ascii_fallback = re.sub(r'[^\x20-\x7e]', '_', filename).strip('_') or 'media'
-            ascii_fallback = ascii_fallback.replace('"', '')
+            stem, dot, ext = filename.rpartition('.')
+            if not dot:
+                stem, ext = filename, ''
+            ascii_stem = re.sub(r'[^\x20-\x7e]', '', stem)
+            ascii_stem = re.sub(r'["\\\\/:*?<>|]', '', ascii_stem).strip(' ._-')
+            ascii_fallback = (ascii_stem or 'media') + ('.' + ext if ext else '')
             self.send_header(
                 'Content-Disposition',
                 "attachment; filename=\"%s\"; filename*=UTF-8''%s" % (ascii_fallback, quoted))
@@ -466,14 +516,23 @@ class APIHandler(BaseHTTPRequestHandler):
 
         if path in ('/', '/health'):
             return self._json_resp(200, {
-                'status': 'ok', 'service': 'media-parser-api', 'version': 2,
+                'status': 'ok', 'service': 'media-parser-api', 'version': 3,
             })
         if path == '/api/preview/video':
             return self._proxy_media(target)
         if path == '/api/preview/image':
             return self._proxy_media(target)
         if path == '/api/download':
-            filename = params.get('filename', ['video.mp4'])[0]
+            # filename 优先；只有 name（纯标题）时按媒体类型补扩展名
+            filename = params.get('filename', [''])[0] or params.get('name', [''])[0] or ''
+            if not filename:
+                filename = 'video.mp4'
+            else:
+                filename = re.sub(r'[/\\\x00-\x1f]', '_', filename).strip() or 'media'
+                stem = filename.rsplit('.', 1)
+                if len(stem) < 2 or len(stem[1]) > 5 or not stem[1].isalnum():
+                    is_img = re.search(r'\.(jpe?g|png|webp|gif|bmp)', (target or ''), re.I)
+                    filename += '.jpg' if is_img else '.mp4'
             return self._proxy_media(target, download=True, filename=filename)
         return self._json_resp(404, {'error': 'Not Found'})
 
