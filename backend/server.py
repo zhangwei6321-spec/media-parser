@@ -255,8 +255,13 @@ def parse_douyin(share_url):
         if u and u not in images:
             images.append(u)
 
-    has_video = bool(play_url)
-    if has_video:
+    # aweme_type 2/68 = 图文作品：抖音会给一个"幻灯片视频"地址，
+    # 但用户要的是原图，所以图文优先按图片返回。
+    aweme_type = item.get('aweme_type')
+    is_image_post = aweme_type in (2, 68) or (images and len(images) > 1)
+    if is_image_post and images:
+        media_type = 'image'
+    elif play_url:
         media_type = 'video'
     elif images:
         media_type = 'image'

@@ -133,10 +133,10 @@ var Parser = (function () {
     }).then(function (d) {
       var info = PLATFORMS[platform];
       var isImageSet = d.type === 'image' && (d.images || []).length > 0;
-      var mediaUrl = d.videoUrl || d.video_url || d.play_url || d.url || '';
       var type = isImageSet ? 'image' : 'video';
-
-      if (type === 'image' && !mediaUrl) mediaUrl = d.images[0];
+      var mediaUrl = type === 'image'
+        ? ((d.images && d.images[0]) || d.videoUrl || '')
+        : (d.videoUrl || d.video_url || d.play_url || d.url || '');
       if (!mediaUrl) throw new Error('未获取到媒体地址，请稍后重试');
 
       var images = (d.images || []).filter(Boolean);
@@ -147,7 +147,8 @@ var Parser = (function () {
         previewUrl: proxiedMediaUrl(mediaUrl, type),
         downloadUrl: BACKEND_BASE + '/api/download?url=' + encodeURIComponent(mediaUrl),
         coverUrl: d.coverUrl || d.cover_url || null,
-        title: d.desc || d.title || '',
+        title: (d.desc || d.title || '').trim()
+               || ((d.author && d.author.nickname) ? d.author.nickname + ' 的作品' : info.name + '视频'),
         author: (d.author && (d.author.nickname || d.author.uniqueId)) || d.nickname || '',
         music: (d.music && d.music.title) || '',
         duration: d.duration || 0,
